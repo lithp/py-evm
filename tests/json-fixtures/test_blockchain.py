@@ -57,13 +57,6 @@ def blockchain_fixture_mark_fn(fixture_path, fixture_name):
         return pytest.mark.xfail(reason="Listed in INCORRECT_UPSTREAM_TESTS.")
 
 
-def blockchain_fixture_ignore_fn(fixture_path, fixture_name):
-    if fixture_path.startswith('GeneralStateTests'):
-        # General state tests are also exported as blockchain tests.  We
-        # skip them here so we don't run them twice
-        return True
-
-
 def pytest_generate_tests(metafunc):
     generate_fixture_tests(
         metafunc=metafunc,
@@ -71,7 +64,6 @@ def pytest_generate_tests(metafunc):
         filter_fn=filter_fixtures(
             fixtures_base_dir=BASE_FIXTURE_PATH,
             mark_fn=blockchain_fixture_mark_fn,
-            ignore_fn=blockchain_fixture_ignore_fn,
         ),
     )
 
@@ -84,8 +76,6 @@ def fixture(fixture_data):
         fixture_key,
         normalize_blockchain_fixtures,
     )
-    if fixture['network'] == 'Constantinople':
-        pytest.skip('Constantinople VM rules not yet supported')
     return fixture
 
 
@@ -111,8 +101,10 @@ def test_blockchain_fixtures(fixture_data, fixture):
     # 2 - loop over blocks:
     #     - apply transactions
     #     - mine block
-    # 4 - profit!!
+    # 3 - diff resulting state with expected state
+    # 4 - check that all previous blocks were valid
 
+    mined_blocks = list()
     for block_fixture in fixture['blocks']:
         should_be_good_block = 'blockHeader' in block_fixture
 
@@ -122,7 +114,7 @@ def test_blockchain_fixtures(fixture_data, fixture):
 
         if should_be_good_block:
             (block, mined_block, block_rlp) = apply_fixture_block_to_chain(block_fixture, chain)
-            assert_mined_block_unchanged(block, mined_block)
+            mined_blocks.append((block, mined_block))
         else:
             try:
                 apply_fixture_block_to_chain(block_fixture, chain)
@@ -133,6 +125,10 @@ def test_blockchain_fixtures(fixture_data, fixture):
                 raise AssertionError("Block should have caused a validation error")
 
     latest_block_hash = chain.get_canonical_block_by_number(chain.get_block().number - 1).hash
-    assert latest_block_hash == fixture['lastblockhash']
+    if latest_block_hash != fixture['lastblockhash']:
+        verify_account_db(fixture['postState'], chain.get_vm().state.account_db)
+        assert False, 'the state must be different if the hashes are'
 
-    verify_account_db(fixture['postState'], chain.get_vm().state.account_db)
+    for block, mined_block in mined_blocks:
+        assert_mined_block_unchanged(block, mined_block)
+        chain.validate_block(block)
