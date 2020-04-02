@@ -687,15 +687,11 @@ def import_body_range(gethdb, chain, start_block, end_block):
             previous_log_time = time.time()
 
 
-def process_blocks(gethdb, chain, end_block):
+def process_blocks(gethdb, start_block, end_block):
     "Imports blocks read out of the gethdb. Simulates a full sync but w/o network traffic"
 
-    canonical_head = chain.headerdb.get_canonical_head()
-    logger.info(f'starting block processing from chain tip: {canonical_head}')
-
-    start_block = max(canonical_head.block_number, 1)
     for i in range(start_block, end_block + 1):
-        import_block(gethdb, chain, i)
+        import_block(gethdb, i)
 
 def import_block(gethdb, i):
     logger.debug(f'importing block: {i}')
@@ -880,14 +876,10 @@ if __name__ == "__main__":
 
     process_blocks_parser = subparsers.add_parser(
         'process_blocks',
-        help="Simulates a full sync, runs each block.",
-        description="""
-                    Starting from trinity's canonical chain tip this fetches block bodies
-                    from the gethdb and runs each of them.
-                    """
+        help="Simulates a full sync, runs each block in the range",
     )
     process_blocks_parser.add_argument('-gethdb', type=str, required=True)
-    process_blocks_parser.add_argument('-destdb', type=str, required=True)
+    process_blocks_parser.add_argument('-startblock', type=int, required=True)
     process_blocks_parser.add_argument('-endblock', type=int, required=True)
 
     read_receipts_parser = subparsers.add_parser(
@@ -938,8 +930,7 @@ if __name__ == "__main__":
         import_body_range(gethdb, chain, args.startblock, args.endblock)
     elif args.command == 'process_blocks':
         gethdb = open_gethdb(args.gethdb)
-        chain = open_trinitydb(args.destdb)
-        process_blocks(gethdb, chain, args.endblock)
+        process_blocks(gethdb, args.startblock, args.endblock)
     elif args.command == 'read_receipts':
         gethdb = open_gethdb(args.gethdb)
         read_receipts(gethdb, args.block)

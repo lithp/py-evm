@@ -130,6 +130,8 @@ def extcodesize(computation: BaseComputation) -> None:
     account = force_bytes_to_address(computation.stack_pop1_bytes())
     code_size = len(computation.state.get_code(account))
 
+    computation.extcodesizes.append((account, code_size))
+
     computation.stack_push_int(code_size)
 
 
@@ -152,9 +154,12 @@ def extcodecopy(computation: BaseComputation) -> None:
     )
 
     code = computation.state.get_code(account)
+    code.code_address = account
 
     code_bytes = code[code_start_position:code_start_position + size]
     padded_code_bytes = code_bytes.ljust(size, b'\x00')
+
+    computation.extcodecopies.append(code.code_reads)
 
     computation.memory_write(mem_start_position, size, padded_code_bytes)
 

@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import itertools
 import logging
 from typing import (
@@ -13,6 +14,7 @@ from typing import (
     Type,
     Union,
 )
+import operator
 
 from cached_property import cached_property
 from eth_hash.auto import keccak
@@ -23,6 +25,7 @@ from eth_typing import (
 from eth_utils import (
     ValidationError,
 )
+from eth_utils.toolz import itertoolz, dicttoolz
 import rlp
 
 from eth.abc import (
@@ -73,6 +76,7 @@ from eth.validation import (
     validate_length_lte,
     validate_gas_limit,
 )
+from eth.vm.code_stream import CodeReadsDict
 from eth.vm.execution_context import (
     ExecutionContext,
 )
@@ -290,7 +294,50 @@ class VM(Configurable, VirtualMachineAPI):
         self._state = self.get_state_class()(self.chaindb.db, execution_context, header.state_root)
 
         # run all of the transactions.
-        new_header, receipts, _ = self.apply_all_transactions(block.transactions, header)
+        new_header, receipts, computations  = self.apply_all_transactions(block.transactions, header)
+
+        all_codes = CodeReadsDict()
+        all_extcodesizes = dict()
+        for i, computation in enumerate(computations):
+            new_code_reads = computation.all_code_reads()
+            new_extcodesizes = computation.all_extcodesizes()
+
+            self.logger.debug(
+                f"block={block.header.block_number} txn={i} "
+                f"used_bytes={new_code_reads.total_read_bytes()} "
+                f"code_bytes={new_code_reads.total_code_bytes()} "
+            )
+
+            all_codes = all_codes + new_code_reads
+            all_extcodesizes = dicttoolz.merge([all_extcodesizes, new_extcodesizes])
+
+        for address, code_reads in all_codes.dict.items():
+            in_extcodesizes = address in all_extcodesizes
+            if in_extcodesizes:
+                all_extcodesizes.pop(address)
+
+            extcodesizestr = " extcodesize" if in_extcodesizes else ""
+
+            self.logger.debug(
+                f"block={block.header.block_number} addr={address.hex()} "
+                f"used_bytes={len(code_reads.reads)} "
+                f"code_bytes={code_reads.code_size}"
+                f"{extcodesizestr}"
+            )
+
+        for address, code_size in all_extcodesizes.items():
+            self.logger.debug(
+                f"block={block.header.block_number} addr={address.hex()} "
+                f"used_bytes=0 "
+                f"code_bytes={code_reads.code_size} "
+                f"extcodesize"
+            )
+
+        self.logger.debug(
+            f"block={block.header.block_number} "
+            f"used_bytes={all_codes.total_read_bytes()} "
+            f"code_bytes={all_codes.total_code_bytes()} "
+        )
 
         self._block = self.set_block_transactions(
             self.get_block(),

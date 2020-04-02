@@ -2,8 +2,16 @@ import contextlib
 import logging
 from typing import (
     Iterator,
-    Set
+    Set,
+    Optional,
+    Dict,
+    List,
 )
+
+from eth_typing import (
+    Address,
+)
+from eth_utils.toolz import dicttoolz
 
 from eth.abc import CodeStreamAPI
 from eth.validation import (
@@ -16,8 +24,61 @@ from eth.vm.opcode_values import (
 )
 
 
+class CodeReads:
+    def __init__(self, address, reads, code_size):
+        self.address: Address = address
+        self.reads: Set[int] = reads
+        self.code_size: int = code_size
+
+    def __add__(self, other: "CodeReads"):
+        if self.address != other.address:
+            raise NotImplemented('in order to add two CodeReads their addresses must match')
+
+        return CodeReads(
+            self.address,
+            self.reads | other.reads,
+            self.code_size,
+        )
+
+
+class CodeReadsDict:
+    def __init__(self, dictionary=None):
+        self.dict: Dict[Address, CodeReads] = dictionary if dictionary else dict()
+
+    def __add__(self, other: "CodeReadsDict"):
+        def merge(codereads: List[CodeReads]):
+            result = codereads[0]
+            for read in codereads[0:]:
+                result = result + read
+            return result
+        return CodeReadsDict(
+            dicttoolz.merge_with(merge, self.dict, other.dict)
+        )
+
+    def add_reads(self, code_reads: CodeReads):
+        address = code_reads.address
+
+        if address not in self.dict:
+            self.dict[address] = code_reads
+        else:
+            self.dict[address] = self.dict[address] + code_reads
+
+    def total_code_bytes(self) -> int:
+        return sum(
+            code_reads.code_size for code_reads in self.dict.values()
+        )
+
+    def total_read_bytes(self) -> int:
+        return sum(
+            len(code_reads.reads) for code_reads in self.dict.values()
+        )
+
+
 class CodeStream(CodeStreamAPI):
-    __slots__ = ['_length_cache', '_raw_code_bytes', 'invalid_positions', 'valid_positions', 'pc']
+    __slots__ = [
+        '_length_cache', '_raw_code_bytes', 'invalid_positions', 'valid_positions',
+        'pc', 'read_positions', 'code_address',
+    ]
 
     logger = logging.getLogger('eth.vm.CodeStream')
 
@@ -32,22 +93,42 @@ class CodeStream(CodeStreamAPI):
         self.invalid_positions: Set[int] = set()
         self.valid_positions: Set[int] = set()
 
+        self.read_positions: Set[int] = set()
+        self.code_address: Address = None
+
+    @property
+    def code_reads(self) -> Optional[CodeReads]:
+        if self.code_address is None:
+            return None
+
+        return CodeReads(
+            self.code_address,
+            self.read_positions,
+            len(self)
+        )
+
     def read(self, size: int) -> bytes:
         old_program_counter = self.program_counter
         target_program_counter = old_program_counter + size
         self.program_counter = target_program_counter
+
+        for i in range(old_program_counter, target_program_counter):
+            self.read_positions.add(i)
+
         return self._raw_code_bytes[old_program_counter:target_program_counter]
 
     def __len__(self) -> int:
         return self._length_cache
 
     def __getitem__(self, i: int) -> int:
+        self.read_positions.add(i)
         return self._raw_code_bytes[i]
 
     def __iter__(self) -> Iterator[int]:
         # a very performance-sensitive method
         pc = self.program_counter
         while pc < self._length_cache:
+            self.read_positions.add(pc)
             opcode = self._raw_code_bytes[pc]
             self.program_counter = pc + 1
             yield opcode
@@ -59,6 +140,7 @@ class CodeStream(CodeStreamAPI):
     def peek(self) -> int:
         pc = self.program_counter
         if pc < self._length_cache:
+            self.read_positions.add(pc)
             return self._raw_code_bytes[pc]
         else:
             return STOP

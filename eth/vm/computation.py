@@ -1,6 +1,7 @@
 from abc import (
     abstractmethod,
 )
+from collections import defaultdict
 import itertools
 from types import TracebackType
 from typing import (
@@ -22,6 +23,7 @@ from eth_utils import (
     encode_hex,
     get_extended_debug_logger,
 )
+from eth_utils.toolz import dicttoolz, itertoolz
 
 from eth.abc import (
     MemoryAPI,
@@ -58,6 +60,8 @@ from eth.validation import (
 )
 from eth.vm.code_stream import (
     CodeStream,
+    CodeReads,
+    CodeReadsDict,
 )
 from eth.vm.gas_meter import (
     GasMeter,
@@ -151,6 +155,17 @@ class BaseComputation(Configurable, ComputationAPI):
 
         code = message.code
         self.code = CodeStream(code)
+
+        self.extcodecopies: List[CodeReads] = []
+        self.extcodesizes: List[Tuple[Address, int]] = []
+
+        if not message.is_create:
+            """
+            CREATE calls use an initcode which was either included as part of the
+            transaction data or derived somehow. This means it does not need to be proven,
+            so we don't track how many bytes are used.
+            """
+            self.code.code_address = message.code_address
 
     #
     # Convenience
@@ -571,3 +586,30 @@ class BaseComputation(Configurable, ComputationAPI):
             return self.opcodes[opcode]
         except KeyError:
             return InvalidOpcode(opcode)
+
+    # Code access API
+
+    def all_code_reads(self) -> CodeReadsDict:
+        result = CodeReadsDict()
+
+        if self.code.code_address is not None:
+            result.add_reads(self.code.code_reads)
+
+        for code_reads in self.extcodecopies:
+            result.add_reads(code_reads)
+
+        for child in self.children:
+            result = result + child.all_code_reads()
+
+        return result
+
+    def all_extcodesizes(self) -> Dict[Address, int]:
+        result = dict()
+
+        for addr, size in self.extcodesizes:
+            if addr in result:
+                assert result[addr] == size
+            result[addr] = size
+
+        child_sizes = [child.all_extcodesizes() for child in self.children]
+        return dicttoolz.merge([result] + child_sizes)
