@@ -376,8 +376,8 @@ class GethChainDB(GethHeaderDB, ChainDatabaseAPI):
 
     ### Header API
 
-    def get_block_uncles(self, uncles_hash: Hash32) -> List[BlockHeader]:
-        body = self._get_block_body(uncles_hash)
+    def get_block_uncles(self, header: BlockHeader) -> List[BlockHeader]:
+        body = self._get_block_body(header.hash)
         return list(body.uncles)  # (it's naturally a tuple)
 
     ### Block API

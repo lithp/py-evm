@@ -77,7 +77,8 @@ class ChainDB(HeaderDB, ChainDatabaseAPI):
     #
     # Header API
     #
-    def get_block_uncles(self, uncles_hash: Hash32) -> Tuple[BlockHeaderAPI, ...]:
+    def get_block_uncles(self, header: BlockHeaderAPI) -> Tuple[BlockHeaderAPI, ...]:
+        uncles_hash = header.uncles_hash
         validate_word(uncles_hash, title="Uncles Hash")
         if uncles_hash == EMPTY_UNCLE_HASH:
             return ()

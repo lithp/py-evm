@@ -107,7 +107,7 @@ class FrontierBlock(BaseBlock):
         if header.uncles_hash == EMPTY_UNCLE_HASH:
             uncles: Tuple[BlockHeader, ...] = ()
         else:
-            uncles = chaindb.get_block_uncles(header.uncles_hash)
+            uncles = chaindb.get_block_uncles(header)
 
         transactions = chaindb.get_block_transactions(header, cls.get_transaction_class())
 
