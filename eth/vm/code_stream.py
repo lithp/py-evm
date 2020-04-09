@@ -112,7 +112,7 @@ class CodeStream(CodeStreamAPI):
         target_program_counter = old_program_counter + size
         self.program_counter = target_program_counter
 
-        for i in range(old_program_counter, target_program_counter):
+        for i in range(old_program_counter, min(target_program_counter, self._length_cache)):
             self.read_positions.add(i)
 
         return self._raw_code_bytes[old_program_counter:target_program_counter]

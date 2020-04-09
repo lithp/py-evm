@@ -302,10 +302,13 @@ class VM(Configurable, VirtualMachineAPI):
             new_code_reads = computation.all_code_reads()
             new_extcodesizes = computation.all_extcodesizes()
 
+            transaction = block.transactions[i]
             self.logger.debug(
                 f"block={block.header.block_number} txn={i} "
+                f"txnhash={transaction.hash.hex()} "
                 f"used_bytes={new_code_reads.total_read_bytes()} "
                 f"code_bytes={new_code_reads.total_code_bytes()} "
+                f"gas_used={computation.get_gas_used() + transaction.get_intrinsic_gas()} "
             )
 
             all_codes = all_codes + new_code_reads

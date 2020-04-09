@@ -607,6 +607,10 @@ class BaseComputation(Configurable, ComputationAPI):
         result = dict()
 
         for addr, size in self.extcodesizes:
+            if addr in result and result[addr] == 0:
+                # this contract was created during this computation
+                pass
+
             if addr in result:
                 assert result[addr] == size
             result[addr] = size
