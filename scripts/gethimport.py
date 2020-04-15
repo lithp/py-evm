@@ -617,6 +617,73 @@ def sweep_state(gethdb: GethDatabase, trinitydb: LevelDB):
 
     logger.info(f'sweep_state: successfully imported {imported_entries} state entries')
 
+def enumerate_state(gethdb: GethDatabase, block):
+
+    if block is None:
+        last_block_hash = gethdb.last_block_hash
+        block = gethdb.block_num_for_hash(last_block_hash)
+
+    header = gethdb.block_header(block)
+    state_root = header.state_root
+
+    logger.info(
+        f'counting all items. header={header} '
+        f'state_root={humanize_hash(state_root)}'
+    )
+
+    storage_roots = set()
+    for i, (path, leaf_data) in enumerate(iterate_leaves(gethdb.db, state_root)):
+        account = rlp.decode(leaf_data, sedes=Account)
+        addr_hash = nibbles_to_bytes(path)
+
+        root = account.storage_root
+        logger.info(f"account i={i:10} addr_hash={addr_hash.hex()} storage_root={root.hex()}")
+
+        if root != BLANK_ROOT_HASH:
+            storage_roots.add(root)
+
+    logger.info("now processing discovered storage roots")
+
+    total_items = 0
+    for root in storage_roots:
+        for i, (path, _leaf_data) in enumerate(iterate_leaves(gethdb.db, root)):
+            if i > 0 and i % 1000 == 0:
+                addr = nibbles_to_bytes(path)
+                logger.debug(f'progress root={root.hex()} items={i:10} path={addr.hex()}')
+        logger.debug(f'storage root={root.hex()} items={i}')
+        total_items += i
+
+    logger.debug(f'total_storage_items={total_items}')
+
+    return
+
+    leveldb = headerdb.db
+    imported_leaf_count = 0
+    importdb = ImportDatabase(gethdb=gethdb.db, trinitydb=leveldb.db)
+    for path, leaf_data in iterate_leaves(importdb, state_root):
+        account = rlp.decode(leaf_data, sedes=Account)
+        addr_hash = nibbles_to_bytes(path)
+
+        if account.code_hash != EMPTY_SHA3:
+            # by fetching it, we're copying it into the trinity database
+            importdb.get(account.code_hash)
+
+        if account.storage_root == BLANK_ROOT_HASH:
+            imported_leaf_count += 1
+
+            if imported_leaf_count % 1000 == 0:
+                logger.debug(f'progress sha(addr)={addr_hash.hex()}')
+            continue
+
+        for path, _leaf_data in iterate_leaves(importdb, account.storage_root):
+            item_addr = nibbles_to_bytes(path)
+            imported_leaf_count += 1
+
+            if imported_leaf_count % 1000 == 0:
+                logger.debug(f'progress sha(addr)={addr_hash.hex()} sha(item)={item_addr.hex()}')
+
+    logger.info('successfully imported state trie and all storage tries')
+
 
 def import_state(gethdb: GethDatabase, chain):
     headerdb = chain.headerdb
@@ -865,6 +932,12 @@ if __name__ == "__main__":
     sweep_state_parser.add_argument('-gethdb', type=str, required=True)
     sweep_state_parser.add_argument('-destdb', type=str, required=True)
 
+    enumerate_state_parser = subparsers.add_parser(
+        'enumerate_state',
+    )
+    enumerate_state_parser.add_argument('-gethdb', type=str, required=True)
+    enumerate_state_parser.add_argument('-block', type=int, required=False)
+
     import_body_range_parser = subparsers.add_parser(
         'import_body_range',
         help="Imports block bodies (transactions and uncles, but not receipts)",
@@ -965,5 +1038,8 @@ if __name__ == "__main__":
     elif args.command == 'import_block':
         gethdb = open_gethdb(args.gethdb)
         import_block(gethdb, args.block)
+    elif args.command == 'enumerate_state':
+        gethdb = open_gethdb(args.gethdb)
+        enumerate_state(gethdb, args.block)
     else:
         logger.error(f'unrecognized command. command={args.command}')
